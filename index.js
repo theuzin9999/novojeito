@@ -1,13 +1,7 @@
 const { chromium } = require('playwright');
 
 const FIREBASE_URL = "https://history-dashboard-a70ee-default-rtdb.firebaseio.com/history";
-
 const AVIATOR_USER_URL = process.env.AVIATOR_USER_URL || "COLE_AQUI_O_SEU_URL_COMPLETO";
-
-if (!AVIATOR_USER_URL || AVIATOR_USER_URL.includes("COLE_AQUI")) {
-    console.error("ERRO CRÍTICO: O URL de utilizador não foi configurado!");
-    process.exit(1);
-}
 
 function obterCor(valorNum) {
     if (valorNum >= 10) return "magenta-bg";
@@ -50,46 +44,73 @@ async function salvarNoFirebase(valorStr) {
         });
         console.log(`[RAILWAY - SALVO]: ${multFormatado}x às ${horaStr}`);
     } catch (err) {
-        console.error("Erro ao enviar para o Firebase:", err);
+        console.error("Erro no Firebase:", err);
     }
 }
 
 (async () => {
-    console.log("Iniciando o robô de captura no Railway...");
+    console.log("Iniciando robô em modo otimizado...");
 
     const browser = await chromium.launch({ 
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-dev-shm-usage',
+            '--window-size=1920,1080'
+        ]
     });
     
     const context = await browser.newContext({
-        viewport: { width: 1280, height: 820 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        viewport: { width: 1920, height: 1080 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        locale: 'pt-BR'
     });
     
     const page = await context.newPage();
 
-    console.log("Acessando o URL de utilizador do Aviator...");
-    await page.goto(AVIATOR_USER_URL, { waitUntil: 'networkidle', timeout: 90000 }).catch(() => {
-        console.log("Aviso: Tempo limite de carregamento atingido, prosseguindo mesmo assim...");
+    // Mascarar atributos de automação no navegador
+    await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
-    console.log("Aguardando carregamento da interface do jogo (15 segundos)...");
-    await page.waitForTimeout(15000);
+    // Monitorizar respostas de rede à procura da API do Aviator
+    page.on('response', async (response) => {
+        const url = response.url();
+        if (url.includes('payouts') || url.includes('history') || url.includes('stats')) {
+            try {
+                const text = await response.text();
+                const matches = text.match(/\d+\.\d{2}x?/g);
+                if (matches && matches.length > 0) {
+                    const ultima = matches[0].replace('x', '');
+                    await salvarNoFirebase(ultima);
+                }
+            } catch (e) {}
+        }
+    });
+
+    console.log("Acessando o URL do Aviator...");
+    try {
+        await page.goto(AVIATOR_USER_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (e) {
+        console.log("Aviso de carregamento inicial:", e.message);
+    }
+
+    await page.waitForTimeout(10000);
 
     let ultimaVelaSalva = "";
+    let tentativasSemSucesso = 0;
 
-    // Loop de verificação a cada 2 segundos
     setInterval(async () => {
         try {
-            // Procura tanto no documento principal quanto dentro de eventuais iframes
             const frames = page.frames();
             let textoVela = null;
 
             for (const frame of frames) {
                 try {
-                    // Seletores para a bolha do histórico no topo do jogo
-                    const el = await frame.$('.payouts-block .bubble-multiplier, .stats-line .bubble-multiplier, app-stats-widget .bubble-multiplier, .payout-item, [class*="bubble"]');
+                    // Seletores abrangentes incluindo a classe padrão Spribe e wrappers
+                    const el = await frame.$('.payouts-block .bubble-multiplier, .payout-item, app-stats-widget .bubble-multiplier, .bubble-multiplier, .payouts-wrapper span, [class*="payout"]');
                     if (el) {
                         const txt = await el.innerText();
                         if (txt && txt.trim()) {
@@ -101,7 +122,7 @@ async function salvarNoFirebase(valorStr) {
             }
 
             if (textoVela) {
-                // Remove 'x' se existir e extrai o número
+                tentativasSemSucesso = 0;
                 const limpo = textoVela.replace('x', '').replace(',', '.').trim();
                 const valorNum = parseFloat(limpo);
 
@@ -113,10 +134,17 @@ async function salvarNoFirebase(valorStr) {
                     }
                 }
             } else {
-                console.log("[STATUS]: Aguardando renderização das velas na tela...");
+                tentativasSemSucesso++;
+                if (tentativasSemSucesso === 5) {
+                    const title = await page.title();
+                    console.log(`[DIAGNOSTICO]: Título da página carregada: "${title}"`);
+                    console.log(`[DIAGNOSTICO]: Total de frames encontrados na página: ${frames.length}`);
+                } else if (tentativasSemSucesso % 15 === 0) {
+                    console.log("[STATUS]: Re-verificando seletores e estrutura da página...");
+                }
             }
         } catch (e) {
-            console.error("Erro no loop de verificação:", e.message);
+            console.error("Erro no loop:", e.message);
         }
     }, 2000);
 })();
