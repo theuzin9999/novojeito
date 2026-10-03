@@ -3,6 +3,11 @@ const { chromium } = require('playwright');
 const FIREBASE_URL = "https://history-dashboard-a70ee-default-rtdb.firebaseio.com/history";
 const AVIATOR_USER_URL = process.env.AVIATOR_USER_URL || "COLE_AQUI_O_SEU_URL_COMPLETO";
 
+if (!AVIATOR_USER_URL || AVIATOR_USER_URL.includes("COLE_AQUI")) {
+    console.error("ERRO CRÍTICO: O URL de utilizador não foi configurado!");
+    process.exit(1);
+}
+
 function obterCor(valorNum) {
     if (valorNum >= 10) return "magenta-bg";
     if (valorNum >= 2) return "purple-bg";
@@ -14,20 +19,21 @@ async function salvarNoFirebase(valorStr) {
     if (isNaN(valorNum) || valorNum <= 0) return;
 
     const multFormatado = valorNum.toFixed(2);
-    const agora = new Date();
     
-    const ano = agora.getFullYear();
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const dia = String(agora.getDate()).padStart(2, '0');
-    const horas = String(agora.getHours()).padStart(2, '0');
-    const minutos = String(agora.getMinutes()).padStart(2, '0');
-    const segundos = String(agora.getSeconds()).padStart(2, '0');
-    const micro = String(Math.floor(Math.random() * 900000) + 100000);
+    // Obter data e hora no fuso horário de Brasília (America/Sao_Paulo)
+    const agora = new Date();
+    const opcoesData = { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' };
+    const opcoesHora = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+
+    const [dia, mes, ano] = agora.toLocaleDateString('pt-BR', opcoesData).split('/');
+    const horaStr = agora.toLocaleTimeString('pt-BR', opcoesHora);
 
     const dataStr = `${ano}-${mes}-${dia}`;
-    const horaStr = `${horas}:${minutos}:${segundos}`;
+    const micro = String(Math.floor(Math.random() * 900000) + 100000);
+
     const multChave = multFormatado.replace('.', '-');
-    const chaveNo = `${ano}-${mes}-${dia}_${horas}-${minutos}-${segundos}-${micro}_${multChave}x`;
+    const horasParaChave = horaStr.replace(/:/g, '-');
+    const chaveNo = `${ano}-${mes}-${dia}_${horasParaChave}-${micro}_${multChave}x`;
 
     const payload = {
         color: obterCor(valorNum),
@@ -42,7 +48,7 @@ async function salvarNoFirebase(valorStr) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        console.log(`[RAILWAY - SALVO]: ${multFormatado}x às ${horaStr}`);
+        console.log(`[RAILWAY - SALVO]: ${multFormatado}x às ${horaStr} (Horário de Brasília)`);
     } catch (err) {
         console.error("Erro no Firebase:", err);
     }
@@ -70,12 +76,12 @@ async function salvarNoFirebase(valorStr) {
     
     const page = await context.newPage();
 
-    // Mascarar atributos de automação no navegador
+    // Mascarar atributos de automação
     await page.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
-    // Monitorizar respostas de rede à procura da API do Aviator
+    // Monitorizar respostas da API em background
     page.on('response', async (response) => {
         const url = response.url();
         if (url.includes('payouts') || url.includes('history') || url.includes('stats')) {
@@ -100,8 +106,8 @@ async function salvarNoFirebase(valorStr) {
     await page.waitForTimeout(10000);
 
     let ultimaVelaSalva = "";
-    let tentativasSemSucesso = 0;
 
+    // Loop de verificação a cada 2 segundos
     setInterval(async () => {
         try {
             const frames = page.frames();
@@ -109,7 +115,6 @@ async function salvarNoFirebase(valorStr) {
 
             for (const frame of frames) {
                 try {
-                    // Seletores abrangentes incluindo a classe padrão Spribe e wrappers
                     const el = await frame.$('.payouts-block .bubble-multiplier, .payout-item, app-stats-widget .bubble-multiplier, .bubble-multiplier, .payouts-wrapper span, [class*="payout"]');
                     if (el) {
                         const txt = await el.innerText();
@@ -122,7 +127,6 @@ async function salvarNoFirebase(valorStr) {
             }
 
             if (textoVela) {
-                tentativasSemSucesso = 0;
                 const limpo = textoVela.replace('x', '').replace(',', '.').trim();
                 const valorNum = parseFloat(limpo);
 
@@ -132,15 +136,6 @@ async function salvarNoFirebase(valorStr) {
                         ultimaVelaSalva = valorAtualStr;
                         await salvarNoFirebase(valorAtualStr);
                     }
-                }
-            } else {
-                tentativasSemSucesso++;
-                if (tentativasSemSucesso === 5) {
-                    const title = await page.title();
-                    console.log(`[DIAGNOSTICO]: Título da página carregada: "${title}"`);
-                    console.log(`[DIAGNOSTICO]: Total de frames encontrados na página: ${frames.length}`);
-                } else if (tentativasSemSucesso % 15 === 0) {
-                    console.log("[STATUS]: Re-verificando seletores e estrutura da página...");
                 }
             }
         } catch (e) {
