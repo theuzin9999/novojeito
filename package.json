@@ -1,0 +1,12 @@
+{
+  "name": "aviator-railway-capturer",
+  "version": "2.0.0",
+  "description": "Capturador de Velas do Aviator via URL Directa de Utilizador",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  }
+}
