@@ -1,11 +1,12 @@
 const { chromium } = require('playwright');
 
 const FIREBASE_URL = "https://history-dashboard-a70ee-default-rtdb.firebaseio.com/history";
-// Lê o URL do seu iframe a partir da variável de ambiente do Railway
-const AVIATOR_USER_URL = process.env.AVIATOR_USER_URL;
 
-if (!AVIATOR_USER_URL) {
-    console.error("ERRO CRÍTICO: A variável AVIATOR_USER_URL não foi definida nas variáveis de ambiente!");
+// Lê da variável de ambiente OU usa o URL direto que colocar abaixo
+const AVIATOR_USER_URL = process.env.AVIATOR_USER_URL || "COLE_AQUI_O_SEU_URL_COMPLETO";
+
+if (!AVIATOR_USER_URL || AVIATOR_USER_URL.includes("COLE_AQUI")) {
+    console.error("ERRO CRÍTICO: O URL de utilizador não foi configurado!");
     process.exit(1);
 }
 
@@ -84,7 +85,7 @@ async function salvarNoFirebase(valorStr) {
                 }
             }
         } catch (e) {
-            // Silencioso em falhas temporárias de renderização
+            // Silencioso em falhas temporárias
         }
     }, 2000);
 })();
