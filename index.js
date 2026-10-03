@@ -8,6 +8,8 @@ if (!AVIATOR_USER_URL || AVIATOR_USER_URL.includes("COLE_AQUI")) {
     process.exit(1);
 }
 
+let ultimaAtividade = Date.now(); // Marca temporal para o Watchdog
+
 function obterCor(valorNum) {
     if (valorNum >= 10) return "magenta-bg";
     if (valorNum >= 2) return "purple-bg";
@@ -20,7 +22,9 @@ async function salvarNoFirebase(valorStr) {
 
     const multFormatado = valorNum.toFixed(2);
     
-    // Obter data e hora no fuso horário de Brasília (America/Sao_Paulo)
+    // Atualiza a marca de atividade sempre que uma vela válida é processada
+    ultimaAtividade = Date.now();
+
     const agora = new Date();
     const opcoesData = { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' };
     const opcoesHora = { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
@@ -54,8 +58,20 @@ async function salvarNoFirebase(valorStr) {
     }
 }
 
+// ------------------- WATCHDOG (MONITOR DE INATIVIDADE) -------------------
+// Se ficar 3 minutos sem registrar NADA, força o Railway a reiniciar o container
+setInterval(() => {
+    const tempoInativoMs = Date.now() - ultimaAtividade;
+    if (tempoInativoMs > 3 * 60 * 1000) { 
+        console.error("⚠️ WATCHDOG ALERTA: Nenhuma vela capturada nos últimos 3 minutos!");
+        console.error("Reiniciando o processo para restabelecer a conexão...");
+        process.exit(1); // O Railway vai reiniciar o container imediatamente
+    }
+}, 30000); // Checa a cada 30 segundos
+// -------------------------------------------------------------------------
+
 (async () => {
-    console.log("Iniciando robô em modo otimizado...");
+    console.log("Iniciando robô em modo resiliente 24/7...");
 
     const browser = await chromium.launch({ 
         headless: true,
@@ -106,6 +122,24 @@ async function salvarNoFirebase(valorStr) {
     await page.waitForTimeout(10000);
 
     let ultimaVelaSalva = "";
+
+    // Previne inatividade movendo o mouse a cada 45 segundos
+    setInterval(async () => {
+        try {
+            await page.mouse.move(Math.floor(Math.random() * 500), Math.floor(Math.random() * 500));
+        } catch (e) {}
+    }, 45000);
+
+    // Recarrega a página preventivamente a cada 30 minutos para evitar leaks
+    setInterval(async () => {
+        console.log("🔄 Recarregando página para prevenção de inatividade/memória...");
+        try {
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(10000);
+        } catch (e) {
+            console.log("Aviso ao recarregar página:", e.message);
+        }
+    }, 30 * 60 * 1000);
 
     // Loop de verificação a cada 2 segundos
     setInterval(async () => {
